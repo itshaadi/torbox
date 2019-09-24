@@ -1,0 +1,280 @@
+#!/bin/bash
+set -eo pipefail
+
+pushd "$(dirname "$0")" > /dev/null
+readonly pathscript=$(pwd)
+popd > /dev/null
+
+# Determine if terminal is capable of showing colors
+if [[ -t 1 ]] && [[ $(tput colors) -ge 8 ]]; then
+    Red='\e[91m'
+    Green='\e[32m'
+    Blue='\e[94m'
+    Yellow='\e[33m'
+    NoColor='\e[0m'
+else
+    Red=''
+    Green=''
+    Blue=''
+    Yello=''
+    NoColor=''
+fi
+
+Tick="[${Green}✓${NoColor}]"
+Cross="[${Red}✗${NoColor}]"
+
+Docker="sudo docker"
+
+if ! [[ ${UID} -eq 0 ]]; then
+    # Check if sudo is actually installed
+    # If it isn't, exit because the torbox can not function
+    if [ -x "$(command -v sudo)" ]; then
+        Sudo="sudo"
+        if groups $USER | grep &>/dev/null '\bdocker\b'; then
+            Docker="docker"
+        fi
+    else
+        echo -e "${CROSS} Script called with non-root privileges, Tor Box requires elevated privleges."
+        exit 1
+    fi
+fi
+
+# Defaults
+readonly gateway='192.168.162.1'
+readonly subnet='192.168.162'
+readonly netmask='/24'
+readonly ssid='Tor Box'
+readonly password='torbox12345'
+readonly countryCode='IR'
+
+showUsage() {
+    echo -e "Usage: \n \t <start|stop> <interface> \n \t <log> <container>"
+}
+
+warn() {
+    echo -e "${Yellow}[WARNING]${NoColor} $1"
+}
+
+err() {
+    echo -e "${Red}[ERROR]${NoColor} $1"
+}
+
+info() {
+    echo -e "${Blue}[INFO]${NoColor} $1"
+}
+
+ok() {
+    echo -e "${Tick} $1"
+}
+
+fail() {
+    echo -e "${Cross} $1"
+}
+
+isAvaliable() {
+    # Check that the requested iface is available
+    if ! [[ -e /sys/class/net/"$1" ]]; then
+        err "The interface provided does not exist."
+        exit 1
+    fi
+}
+
+isDefaultRoute() {
+    if [[ $(${Sudo} ip r | grep default | cut -d " " -f5) == "$1" ]]; then
+        err "The selected interface is configured as the default route, if you use it you will lose internet connectivity."
+        exit 1
+    fi
+}
+
+isHostapdRunning() {
+    local pid=$(pgrep hostapd)
+    if [[ ! "$pid" == "" ]]; then
+        warn "hostapd is already running, make sure you use a different wireless interface..."
+    fi
+}
+
+generateConfigs() {
+    local interface="$1"
+    sed -e "s/_IFACE/$interface/" \
+        -e "s/_SUBNET_START/$subnet.20/g" \
+        -e "s/_SUBNET_END/$subnet.254/g" \
+        "$pathscript"/templates/dnsmasq.template > "$pathscript"/dnsmasq.conf
+    ok "Generating dnsmasq.conf"
+
+    sed -e "s/_IFACE/$interface/" \
+        -e "s/_COUNTRY_CODE/$countryCode/" \
+        -e "s/_SSID/$ssid/" \
+        -e "s/_PASSWORD/$password/" \
+        "$pathscript"/templates/hostapd.template > "$pathscript"/hostapd.conf
+    ok "Generating hostapd.conf"
+
+    sed -e "s/_GATEWAY/$gateway/" \
+        "$pathscript"/templates/torrc.template > "$pathscript"/torrc
+    ok "Generating torrc"
+}
+
+checkImages() {
+    local images=("busybox" "torbox/dnsmasq" "torbox/hostapd" "torbox/tor")
+    for img in "${images[@]}"; do
+        if [[ $(${Docker} images -q "$img") == "" ]]; then
+            fail "$img not found."
+            if [[ $img == 'busybox' ]]; then
+                info "Pulling $img"
+                ${Docker} pull $img
+            else
+                info "Building $img"
+                dockerfile="$pathscript/Dockerfile.${img#"torbox/"}"
+                ${Docker} build --rm -t $img -f $dockerfile .
+            fi
+        else
+            ok "$img found."
+        fi
+
+    done
+}
+
+init() {
+    local interface="$1"
+    generateConfigs $interface
+    checkImages
+}
+
+startingContainers() {
+    info "Starting torbox-dnsmasq"
+    ${Docker} run -dt --name torbox-dnsmasq --restart=unless-stopped --network=container:torbox --cap-add=NET_ADMIN \
+     --cap-add=NET_RAW -v "$pathscript"/dnsmasq.conf:/etc/dnsmasq.conf torbox/dnsmasq > /dev/null 2>&1
+
+    info "Starting torbox-hostapd"
+    ${Docker} run -dt --name torbox-hostapd --restart=unless-stopped --network=container:torbox --cap-add=NET_ADMIN \
+     --cap-add=NET_RAW -v "$pathscript"/hostapd.conf:/etc/hostapd.conf torbox/hostapd > /dev/null 2>&1
+
+    info "Starting torbox-tor"
+    ${Docker} run -dt --name torbox-tor --restart=unless-stopped --network=container:torbox --cap-add=NET_ADMIN \
+     -v "$pathscript"/torrc:/etc/tor/torrc torbox/tor > /dev/null 2>&1
+}
+
+waitForTor() {
+    local timeout=30
+    local waitSec=0
+    while [ $waitSec -le $timeout ]; do
+        check=$(${Docker} logs --tail 50 torbox-tor | grep Done)
+        if [[ "$check" == "" ]]; then
+            sleep 1
+            waitSec=$(( $waitSec + 1 ))
+        else
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+start() {
+    local interface="$1"
+
+    # Find the physical interface for the given wireless interface
+    local phy=$(cat /sys/class/net/"$interface"/phy80211/name)
+
+    ${Sudo} ip link set "$interface" up
+
+    info "Starting torbox"
+    ${Docker} run -dt --name torbox --net=bridge busybox > /dev/null 2>&1
+    local pid=$(${Docker} inspect -f '{{.State.Pid}}' torbox)
+
+    # Assign phy wireless interface to the container 
+    ${Sudo} mkdir -p /var/run/netns
+    ${Sudo} ln -s /proc/"$pid"/ns/net /var/run/netns/"$pid"
+    ${Sudo} iw phy "$phy" set netns "$pid"
+    ok "Assigning $interface to torbox"
+
+    ${Sudo} ip netns exec "$pid" ip addr flush dev "$interface"
+    ${Sudo} ip netns exec "$pid" ip link set "$interface" up
+    ${Sudo} ip netns exec "$pid" ip addr add "$gateway$netmask" dev "$interface"
+    ok "Assigning $gateway to $interface"
+
+    ${Sudo} ip netns exec "$pid" iptables -t nat -A POSTROUTING -s $subnet.0$netmask ! -d $subnet.0$netmask -j MASQUERADE
+    ok "Enabling NAT"
+
+    ${Sudo} ip netns exec "$pid" echo 1 | ${Sudo} tee /proc/sys/net/ipv4/ip_forward > /dev/null
+    ok "Enabling IP Forwarding"
+
+    startingContainers
+
+    ${Sudo} ip netns exec "$pid" iptables -t nat -A PREROUTING -p tcp --dport 22 -j REDIRECT --to-ports 22
+    ${Sudo} ip netns exec "$pid" iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 9061
+    ${Sudo} ip netns exec "$pid" iptables -t nat -A PREROUTING -p tcp --syn -j REDIRECT --to-ports 9051
+
+    ${Sudo} ip netns exec "$pid" iptables -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+    ${Sudo} ip netns exec "$pid" iptables -I INPUT -p tcp ! -s 192.168.162.0/24 --dport 22 -j DROP
+
+    ${Sudo} ip netns exec "$pid" iptables -A FORWARD -p icmp -s 192.168.162.0/24 -d 192.168.162.0/24 -j ACCEPT
+    ${Sudo} ip netns exec "$pid" iptables -A FORWARD -p udp -s 192.168.162.0/24 -d 192.168.162.0/24 -j ACCEPT
+
+    ${Sudo} ip netns exec "$pid" iptables -A FORWARD -p icmp -j REJECT
+    ${Sudo} ip netns exec "$pid" iptables -A FORWARD -p udp -j REJECT
+
+    info "Bootstraping ..."
+    if waitForTor; then
+        echo -e "${Green}Done!${NoColor}"
+    else
+        fail "Bootstraping proccess failed. run 'docker logs --tail 100 torbox-tor' for more information."
+    fi
+
+}
+
+stop() {
+    local interface="$1"
+    local silence="${1-"0"}"
+    local containers=("torbox-tor" "torbox-dnsmasq" "torbox-hostapd" "torbox")
+    local files=("dnsmasq.conf" "hostapd.conf" "torrc")
+
+    if [[ $(${Docker} ps --format {{.Names}} | grep torbox) != "" ]]; then
+
+        if [[ "$silence" -eq 0 ]]; then
+            info "Removing Containers"
+        fi
+
+        for container in "${containers[@]}"; do
+            ${Docker} rm -f $container > /dev/null 2>&1
+        done
+
+        for file in "${files[@]}"; do
+            src="$pathscript/$file"
+            if [[ -e "$src" ]]; then
+                ${Sudo} rm -f "$src"
+            fi
+        done
+
+        ${Sudo} ip addr del "$gateway$netmask" dev "$interface" > /dev/null 2>&1
+
+        # Clean up dangling symlinks in /var/run/netns
+        ${Sudo} find -L /var/run/netns -type l -delete
+    fi
+
+}
+
+if [[ "$#" -eq 0 ]] || [[ "$1" == "help" ]]; then
+    showUsage
+    exit 1
+elif [[ "$#" -gt 2 ]]; then
+    showUsage
+    exit 1
+elif [[ "$1" == "log" ]]; then
+    if [[ -z "$2" ]]; then
+        err "No container name provided."
+        exit 1
+    fi
+    ${Docker} logs --tail 50 --follow --timestamps "$2"
+elif [[ -z "$2" ]]; then
+    err "No interface provided."
+    exit 1
+elif [[ "$1" == "start" ]]; then
+    stop "$2" 1
+    init "$2"
+    start "$2"
+elif [[ "$1" == "stop" ]]; then
+    stop "$2"
+elif [ "$1" != "help" ]
+then
+    showUsage
+fi
