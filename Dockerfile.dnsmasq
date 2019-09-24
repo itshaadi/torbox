@@ -1,0 +1,6 @@
+FROM alpine:3.9
+LABEL maintainer="Hadi Azami <iazami@outlook.com>"
+
+RUN apk add -U --no-cache dnsmasq
+
+ENTRYPOINT [ "dnsmasq", "--no-daemon", "--log-queries" ]
