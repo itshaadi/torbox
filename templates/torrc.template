@@ -1,0 +1,10 @@
+TransPort _GATEWAY:9051
+DNSPort _GATEWAY:9061
+
+VirtualAddrNetwork 10.66.0.0/255.255.0.0
+AutomapHostsOnResolve 1
+
+# ClientTransportPlugin obfs4 exec /usr/bin/obfs4proxy
+# UseBridges 1
+
+# Add Bridges here

@@ -1,0 +1,14 @@
+ctrl_interface=/var/run/hostapd
+interface=_IFACE
+hw_mode=g
+channel=6
+country_code=_COUNTRY_CODE
+ieee80211d=1
+ieee80211n=1
+wmm_enabled=1
+ssid=_SSID
+auth_algs=1
+wpa=2
+wpa_key_mgmt=WPA-PSK  
+rsn_pairwise=CCMP
+wpa_passphrase=_PASSWORD

@@ -1,0 +1,4 @@
+no-resolv 
+interface=lo,_IFACE
+no-dhcp-interface=lo
+dhcp-range=_SUBNET_START,_SUBNET_END,255.255.255.0,12h
