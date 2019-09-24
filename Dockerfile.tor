@@ -1,0 +1,12 @@
+FROM debian:10-slim
+LABEL maintainer="Hadi Azami <iazami@outlook.com>"
+
+RUN apt-get update && apt-get install -y tor obfs4proxy
+
+ADD ./torrc /etc/tor/torrc
+
+USER debian-tor
+
+EXPOSE 9061 9051
+
+CMD ["tor", "-f", "/etc/tor/torrc"]
