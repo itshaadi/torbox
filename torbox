@@ -34,7 +34,7 @@ if ! [[ ${UID} -eq 0 ]]; then
             Docker="docker"
         fi
     else
-        echo -e "${CROSS} Script called with non-root privileges, Tor Box requires elevated privleges."
+        echo -e "${Cross} Script called with non-root privileges, Tor Box requires elevated privleges."
         exit 1
     fi
 fi
