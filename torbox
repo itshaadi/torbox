@@ -141,15 +141,15 @@ init() {
 
 startingContainers() {
     info "Starting torbox-dnsmasq"
-    ${Docker} run -dt --name torbox-dnsmasq --restart=unless-stopped --network=container:torbox --cap-add=NET_ADMIN \
+    ${Docker} run -dt --name torbox-dnsmasq --network=container:torbox --cap-add=NET_ADMIN \
      --cap-add=NET_RAW -v "$pathscript"/dnsmasq.conf:/etc/dnsmasq.conf torbox/dnsmasq > /dev/null 2>&1
 
     info "Starting torbox-hostapd"
-    ${Docker} run -dt --name torbox-hostapd --restart=unless-stopped --network=container:torbox --cap-add=NET_ADMIN \
+    ${Docker} run -dt --name torbox-hostapd --network=container:torbox --cap-add=NET_ADMIN \
      --cap-add=NET_RAW -v "$pathscript"/hostapd.conf:/etc/hostapd.conf torbox/hostapd > /dev/null 2>&1
 
     info "Starting torbox-tor"
-    ${Docker} run -dt --name torbox-tor --restart=unless-stopped --network=container:torbox --cap-add=NET_ADMIN \
+    ${Docker} run -dt --name torbox-tor --network=container:torbox --cap-add=NET_ADMIN \
      -v "$pathscript"/torrc:/etc/tor/torrc torbox/tor > /dev/null 2>&1
 }
 
