@@ -1,6 +1,6 @@
 <p align="center">
   <h3 align="center">Tor Box</h3>
-  <p align="center">A Container-based Tor Accesspoint.</p>
+  <p align="center">Container-based Tor access point.</p>
 
   <p align="center">
     <a href="https://github.com/GouveaHeitor/nipe/blob/master/LICENSE.md">
@@ -27,7 +27,7 @@
     Tor Box is to be used only as a BACKUP for situations where popular solutions (such as OpenVPN)
     are temporarily blocked by a state firewall.
 
-    This goal is achived by sharing a Network Namespace between the comtainers.
+    This goal is achived by sharing a Network Namespace between the containers.
 
 
 #### Requirements:
@@ -42,7 +42,10 @@
 **note:** edit `templates/torrc.template` according to your needs but do not touch `TransPort` and `DNSPort`
 
 ### Installation
-Tested on Debian 10 with RT5370 Wireless Adapter
+Tested on:
+* Debian 10 with RT5370 Wireless Adapter
+* Raspberry Pi 3
+
 ```
 git clone https://github.com/itshaadi/torbox.git
 
