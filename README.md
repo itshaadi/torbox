@@ -1,6 +1,6 @@
 <p align="center">
   <h3 align="center">Tor Box</h3>
-  <p align="center">Container-based Tor access point.</p>
+  <p align="center">Container-based Tor access point (Anonymizing Middlebox).</p>
 
   <p align="center">
     <a href="https://github.com/GouveaHeitor/nipe/blob/master/LICENSE.md">
@@ -21,13 +21,13 @@
 
     This script enables you to directly route traffic of connected devices to the Tor network
     Currently Tor Box only supports IPv4, and only traffic from TCP/DNS/DHCP is allowed
-    any non-local traffic from UDP/ICMP is blocked.
+    any non-local traffic from other protocols are blocked.
 
-    this script is not optimized for visiting hidden services. please use Tor Browser instead.
+    this script is not optimized for visiting .onion addresses. please use Tor Browser instead.
     Tor Box is to be used only as a BACKUP for situations where popular solutions (such as OpenVPN)
     are temporarily blocked by a state firewall.
 
-    This goal is achived by sharing a Network Namespace between the containers.
+    This isolation is achived by sharing a Network Namespace between the containers.
 
 
 #### Requirements:
@@ -57,6 +57,7 @@ chmod +x torbox
 useful documentations:
 * [hostapd](https://wiki.gentoo.org/wiki/Hostapd)
 * [dnsmasq](https://wiki.archlinux.org/index.php/Dnsmasq)
+* [Local Redirection and Anonymizing Middlebox](https://trac.torproject.org/projects/tor/wiki/doc/TransparentProxy#LocalRedirectionandAnonymizingMiddleboxy)
 
 ### Usage
 
@@ -74,7 +75,7 @@ eg: ./torbox start wlan0
 
 #### nmap results
 ```
-sudo nmap -sU -p 10558 38.84.132.167 # us1.freeopenvpn.org
+sudo nmap -sU -p 10558 38.84.132.167 # us1.freeopenvpn.org (non-local UDP connection is dropped)
 
 Starting Nmap 7.80 ( https://nmap.org ) at XXXXXX
 Nmap scan report for 38.84.132.167
@@ -83,14 +84,14 @@ Host is up (0.00085s latency).
 PORT      STATE    SERVICE
 10558/udp filtered unknown
 
-sudo nmap -sU -p 9061 192.168.162.1 # local UDP is allowed
+sudo nmap -sU -p 5353 192.168.162.1 # DNS (which uses UDP) is allowed
 
 Starting Nmap 7.80 ( https://nmap.org ) at XXXXX
 Nmap scan report for 192.168.162.1
 Host is up (0.00053s latency).
 
 PORT     STATE  SERVICE
-9061/udp open   unknown
+5353/udp open   zeroconf
 MAC Address: XXXXXXXX (Tenda Technology)
 ```
 >  Filtered means that a firewall, filter, or other network obstacle is blocking the port so that Nmap cannot tell whether it is open or closed. [source](https://wiki.onap.org/display/DW/Nmap)
