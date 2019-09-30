@@ -1,8 +1,10 @@
-TransPort _GATEWAY:9051
-DNSPort _GATEWAY:9061
-
-VirtualAddrNetwork 10.66.0.0/255.255.0.0
+VirtualAddrNetworkIPv4 10.192.0.0/10
 AutomapHostsOnResolve 1
+
+TransPort _GATEWAY:9040 IsolateClientAddr IsolateClientProtocol IsolateDestAddr IsolateDestPort
+TransPort 127.0.0.1:9040 IsolateClientAddr IsolateClientProtocol IsolateDestAddr IsolateDestPort
+DNSPort _GATEWAY:5353
+DNSPort 127.0.0.1:5353
 
 # ClientTransportPlugin obfs4 exec /usr/bin/obfs4proxy
 # UseBridges 1
