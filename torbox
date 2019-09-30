@@ -46,6 +46,11 @@ readonly netmask='/24'
 readonly ssid='Tor Box'
 readonly password='torbox12345'
 readonly countryCode='IR'
+readonly transPort="9040"
+readonly DNSPort="5353"
+readonly virtAddr="10.192.0.0/10"
+readonly nonTor="127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.128.0.0/10"
+readonly resvIana="0.0.0.0/8 100.64.0.0/10 169.254.0.0/16 192.0.0.0/24 192.0.2.0/24 192.88.99.0/24 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4 255.255.255.255/32"
 
 showUsage() {
     echo -e "Usage: \n \t <start|stop> <interface> \n \t <log> <container>"
@@ -169,6 +174,81 @@ waitForTor() {
     return 1
 }
 
+applyIPTables() {
+    # source: https://trac.torproject.org/projects/tor/wiki/doc/TransparentProxy#LocalRedirectionandAnonymizingMiddlebox
+    local pid="$1"
+    local interface="$2"
+    local cmd="${Sudo} ip netns exec ${pid}"
+    local torUID=$(docker exec -u debian-tor torbox-tor id -u)
+
+    ${cmd} iptables -t nat -A PREROUTING -d $virtAddr -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REDIRECT --to-ports $transPort
+    ${cmd} iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports $DNSPort
+
+    for _lan in $nonTor; do
+        ${cmd} iptables -t nat -A PREROUTING -d $_lan -j RETURN
+    done
+
+    for _iana in $resvIana; do
+        ${cmd} iptables -t nat -A PREROUTING -d $_iana -j RETURN
+    done
+
+    ${cmd} iptables -t nat -A PREROUTING -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REDIRECT --to-ports $transPort
+    ${cmd} iptables -t nat -A OUTPUT -d 127.0.0.1/32 -p udp -m udp --dport 53 -j REDIRECT --to-ports $DNSPort
+    ${cmd} iptables -t nat -A OUTPUT -m owner --uid-owner $torUID -j RETURN
+    ${cmd} iptables -t nat -A OUTPUT -o lo -j RETURN
+    
+    for _lan in $nonTor; do
+        ${cmd} iptables -t nat -A OUTPUT -d $_lan -j RETURN
+    done
+
+    for _iana in $resvIana; do
+        ${cmd} iptables -t nat -A OUTPUT -d $_iana -j RETURN
+    done
+
+    ${cmd} iptables -t nat -A OUTPUT -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REDIRECT --to-ports $transPort
+
+    ${cmd} iptables -A INPUT -m state --state ESTABLISHED -j ACCEPT
+    ${cmd} iptables -A INPUT -i lo -j ACCEPT
+
+    ${cmd} iptables -A INPUT -d $gateway -p udp -m udp --dport $DNSPort -j ACCEPT
+
+    # allow DHCP
+    ${cmd} iptables -A INPUT -p udp -m udp --dport 67 -j ACCEPT
+    ${cmd} iptables -A INPUT -p udp -m udp --dport 68 -j ACCEPT
+
+    ${cmd} iptables -A INPUT -d $gateway -p tcp -m tcp --dport $transPort --tcp-flags FIN,SYN,RST,ACK SYN -j ACCEPT
+
+
+    for _lan in $nonTor; do
+        ${cmd} iptables -A INPUT -s $_lan -j ACCEPT
+    done
+
+    ${cmd} iptables -A INPUT -j LOG --log-prefix "Dropped INPUT packet: " --log-level 7 --log-uid
+    ${cmd} iptables -A INPUT -j DROP
+
+    ${cmd} iptables -A FORWARD -j DROP
+
+    ${cmd} iptables -A OUTPUT -m state --state INVALID -j DROP
+    ${cmd} iptables -A OUTPUT -m state --state ESTABLISHED -j ACCEPT
+
+    ${cmd} iptables -A OUTPUT -o $interface -m owner --uid-owner $torUID -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -m state --state NEW -j ACCEPT
+
+    ${cmd} iptables -A OUTPUT -d 127.0.0.1/32 -o lo -j ACCEPT
+
+    ${cmd} iptables -A OUTPUT -d 127.0.0.1/32 -p tcp -m tcp --dport $transPort --tcp-flags FIN,SYN,RST,ACK SYN -j ACCEPT
+
+    for _lan in $nonTor; do
+        ${cmd} iptables -A OUTPUT -d $_lan -j ACCEPT
+    done
+
+    ${cmd} iptables -A OUTPUT -j LOG --log-prefix "Dropped OUTPUT packet: " --log-level 7 --log-uid
+    ${cmd} iptables -A OUTPUT -j DROP
+
+    ${cmd} iptables -P INPUT DROP
+    ${cmd} iptables -P FORWARD DROP
+    ${cmd} iptables -P OUTPUT DROP
+}
+
 start() {
     local interface="$1"
 
@@ -200,21 +280,9 @@ start() {
 
     startingContainers
 
-    ${Sudo} ip netns exec "$pid" iptables -t nat -A PREROUTING -p tcp --dport 22 -j REDIRECT --to-ports 22
-    ${Sudo} ip netns exec "$pid" iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 9061
-    ${Sudo} ip netns exec "$pid" iptables -t nat -A PREROUTING -p tcp --syn -j REDIRECT --to-ports 9051
-
-    ${Sudo} ip netns exec "$pid" iptables -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
-    ${Sudo} ip netns exec "$pid" iptables -I INPUT -p tcp ! -s 192.168.162.0/24 --dport 22 -j DROP
-
-    ${Sudo} ip netns exec "$pid" iptables -A FORWARD -p icmp -s 192.168.162.0/24 -d 192.168.162.0/24 -j ACCEPT
-    ${Sudo} ip netns exec "$pid" iptables -A FORWARD -p udp -s 192.168.162.0/24 -d 192.168.162.0/24 -j ACCEPT
-
-    ${Sudo} ip netns exec "$pid" iptables -A FORWARD -p icmp -j REJECT
-    ${Sudo} ip netns exec "$pid" iptables -A FORWARD -p udp -j REJECT
-
     info "Bootstraping ..."
     if waitForTor; then
+        applyIPTables $pid $interface
         echo -e "${Green}Done!${NoColor}"
     else
         fail "Bootstraping proccess failed. run 'docker logs --tail 100 torbox-tor' for more information."
