@@ -275,9 +275,6 @@ start() {
     ${Sudo} ip netns exec "$pid" iptables -t nat -A POSTROUTING -s $subnet.0$netmask ! -d $subnet.0$netmask -j MASQUERADE
     ok "Enabling NAT"
 
-    ${Sudo} ip netns exec "$pid" echo 1 | ${Sudo} tee /proc/sys/net/ipv4/ip_forward > /dev/null
-    ok "Enabling IP Forwarding"
-
     startingContainers
 
     info "Bootstraping ..."
